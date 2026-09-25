@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Emerald Blade — A Legend of Aetheria</title>
+<style>
+    body { margin: 0; padding: 0; background: #0a0a0a; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
+    h1 { margin: 6px; height: 52px; }
+    h1 img { height: 52px; filter: drop-shadow(0 0 8px rgba(46, 204, 113, 0.6)); }
+    #gameContainer { position: relative; }
+    canvas { background: #1a1a1a; border: 3px solid #27ae60; box-shadow: 0 0 30px rgba(46, 204, 113, 0.4); display: block; }
+    #ui { position: absolute; top: 10px; left: 10px; font-size: 18px; font-weight: bold; text-shadow: 1px 1px 2px #000; pointer-events: none; }
+    #hearts img { width: 22px; height: 22px; margin-right: 1px; vertical-align: middle; }
+    #hearts { margin-bottom: 4px; }
+    #locationText { color: #d5dbdb; font-size: 15px; }
+    #bossUi { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); width: 60%; text-align: center; display: none; pointer-events: none; }
+    #bossName { color: #e74c3c; font-size: 20px; margin-bottom: 5px; text-shadow: 0 0 5px #000; }
+    #bossHpBar { width: 100%; height: 15px; background: #333; border: 2px solid #e74c3c; border-radius: 5px; overflow: hidden; }
+    #bossHpFill { width: 100%; height: 100%; background: linear-gradient(90deg, #c0392b, #e74c3c); transition: width 0.2s; }
+    #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); flex-direction: column; align-items: center; justify-content: center; color: #2ecc71; font-size: 28px; text-align: center; display: none; }
+    #controls { margin-top: 15px; color: #7f8c8d; font-size: 14px; text-align: center; }
+    .btn-hint { display: inline-block; padding: 2px 8px; background: #333; border: 1px solid #555; border-radius: 4px; margin: 0 3px; color: #2ecc71; }
+</style>
+</head>
+<body>
+
+<h1><img src="sprites/logo.png" alt="Emerald Blade — A Legend of Aetheria"></h1>
+<div id="gameContainer">
+    <canvas id="canvas" width="800" height="600"></canvas>
+    <div id="ui">
+        <div id="hearts"></div>
+        <div id="locationText">Shadow Keep - Area 1</div>
+    </div>
+    <div id="bossUi">
+        <div id="bossName">BOSS</div>
+        <div id="bossHpBar"><div id="bossHpFill"></div></div>
+    </div>
+    <div id="overlay">
+        <div id="overlayTitle">Area Cleared!</div>
+        <div id="overlaySub" style="font-size: 18px; margin-top: 10px; color: #bdc3c7;">Press <span class="btn-hint">SPACE</span> to continue</div>
+    </div>
+</div>
+<div id="controls">
+    Move: <span class="btn-hint">W</span><span class="btn-hint">A</span><span class="btn-hint">S</span><span class="btn-hint">D</span> or <span class="btn-hint">▲</span><span class="btn-hint">◀</span><span class="btn-hint">▼</span><span class="btn-hint">▶</span> |
+    Sword: <span class="btn-hint">Z</span> or <span class="btn-hint">J</span> |
+    Block: <span class="btn-hint">X</span> or <span class="btn-hint">K</span> or <span class="btn-hint">SHIFT</span>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+// --- SPRITES ---
+// Frames extracted from the sprite sheets in /sprites (see sprites/manifest.json)
+const SPRITES = {
+    // Player knight (knight.png): idle, walk, slash, block, hurt, death
+    knight: {
+        idle:  ['knight_001', 'knight_002'],
+        walk:  ['knight_011', 'knight_013', 'knight_012'],
+        slash: ['knight_014', 'knight_015'],
+        block: ['knight_017', 'knight_018'],
+        hurt:  ['knight_021'],
+        death: ['knight_023', 'knight_024']
+    },
+    // Enemies (bad guys.png)
+    skeleton: { walk: ['bad_guys_001', 'bad_guys_002', 'bad_guys_003', 'bad_guys_004', 'bad_guys_005'] },
+    ghoul:    { walk: ['bad_guys_006', 'bad_guys_007', 'bad_guys_008'] },
+    dknight:  { walk: ['bad_guys_012', 'bad_guys_013', 'bad_guys_014', 'bad_guys_015', 'bad_guys_016', 'bad_guys_017'] },
+    wizard:   { walk: ['bad_guys_022', 'bad_guys_023', 'bad_guys_024', 'bad_guys_025', 'bad_guys_026', 'bad_guys_027', 'bad_guys_028'] },
+    bat:      { walk: ['bad_guys_034', 'bad_guys_035', 'bad_guys_036', 'bad_guys_037'] },
+    elite1:   { walk: ['bad_guys_000'] },
+    elite2:   { walk: ['bad_guys_011'] },
+    elite3:   { walk: ['bad_guys_029'] },
+    // Boss (villian.png)
+    boss: {
+        idle:   ['villian_000', 'villian_002', 'villian_003'],
+        walk:   ['villian_005', 'villian_006'],
+        attack: ['villian_001', 'villian_004', 'villian_020'],
+        death:  ['villian_016', 'villian_017']
+    },
+    // Castle tiles & props (castle.png)
+    floor1:   'castle_002', floor2: 'castle_003', floor3: 'castle_004', // stone slabs
+    brick:    'castle_006',  // brick wall segment
+    block:    'castle_008',  // small brick block
+    pillar1:  'castle_022', pillar2: 'castle_023', pillar3: 'castle_024', pillar4: 'castle_025',
+    door:     'castle_015',
+    gate:     'castle_020',  // spiked iron gate (boss room backdrop)
+    chest:    'castle_036', chestOpen: 'castle_037',
+    // Items (items.png)
+    heartFull: 'items_006', heartHalf: 'items_007', heartEmpty: 'items_008',
+    slashTrail: 'items_053',
+    orb:      'items_052',
+    ring:     'items_055',
+    star:     'items_054'
+};
+
+const IMG = {};
+function collectFiles() {
+    const files = new Set();
+    for (const key of Object.keys(SPRITES)) {
+        const v = SPRITES[key];
+        if (typeof v === 'string') files.add(v);
+        else for (const state of Object.keys(v)) v[state].forEach(f => files.add(f));
+    }
+    return [...files];
+}
+
+function loadSprites() {
+    const files = collectFiles();
+    let loaded = 0;
+    const overlay = document.getElementById('overlay');
+    overlay.style.display = 'flex';
+    document.getElementById('overlayTitle').innerText = 'Loading…';
+    document.getElementById('overlaySub').innerText = '';
+    return Promise.all(files.map(f => new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            IMG[f] = img;
+            loaded++;
+            document.getElementById('overlayTitle').innerText = `Loading… ${loaded}/${files.length}`;
+            resolve();
+        };
+        img.onerror = () => reject(new Error('Failed to load sprites/' + f + '.png'));
+        img.src = 'sprites/' + f + '.png';
+    }))).then(() => {
+        overlay.style.display = 'none';
+    });
+}
+
+// Draw helpers ------------------------------------------------------------
+// Sprites face LEFT by default; facing === 1 means flipped to the right.
+function drawSprite(file, cx, bottomY, targetH, facing, alpha) {
+    const img = IMG[file];
+    if (!img) return;
+    const scale = targetH / img.height;
+    const dw = img.width * scale, dh = targetH;
+    ctx.save();
+    if (alpha !== undefined) ctx.globalAlpha = alpha;
+    if (facing === 1) {
+        ctx.translate(cx, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(img, -dw / 2, bottomY - dh, dw, dh);
+    } else {
+        ctx.drawImage(img, cx - dw / 2, bottomY - dh, dw, dh);
+    }
+    ctx.restore();
+}
+
+function animFrame(ent, frames) {
+    return frames[Math.floor(ent.animT / 8) % frames.length];
+}
+
+// --- GAME STATE ---
+let gameState = 'LOADING'; // LOADING, PLAYING, TRANSITION, GAMEOVER, VICTORY
+let currentCastle = 1;
+let currentArea = 1;
+const MAX_CASTLES = 3;
+const MAX_AREAS = 4;
+
+// --- INPUT ---
+const keys = {};
+window.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if (e.code === 'Space' && gameState === 'TRANSITION') nextArea();
+    if (e.code === 'Space' && gameState === 'GAMEOVER') restartGame();
+    if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+// --- CASTLE & AREA CONFIG ---
+const CASTLES = [
+    { name: "Shadow Keep",    tint: 'rgba(142, 68, 173, 0.14)',  floor: '#2c3e50', wall: '#1a252f', boss: "Shadow Knight", bossColor: '#8e44ad' },
+    { name: "Iron Fortress",  tint: 'rgba(211, 84, 0, 0.14)',    floor: '#7f8c8d', wall: '#34495e', boss: "Iron Golem",    bossColor: '#d35400' },
+    { name: "Emerald Citadel",tint: 'rgba(46, 204, 113, 0.14)',  floor: '#145a32', wall: '#0b5345', boss: "Emerald Dragon", bossColor: '#2ecc71' }
+];
+
+// --- ENTITIES ---
+let player, enemies, walls, projectiles, particles, effects;
+
+function initPlayer() {
+    player = {
+        x: W/2 - 15, y: H/2 - 15, w: 30, h: 30,
+        vx: 0, vy: 0, speed: 3.5,
+        hp: 100, maxHp: 100,
+        dir: 2, facing: -1, // 0:up, 1:right, 2:down, 3:left
+        attacking: 0, attackCooldown: 0,
+        blocking: false,
+        invincible: 0,
+        hitFlash: 0,
+        animT: 0, moving: false
+    };
+}
+
+function updateUI() {
+    // Hearts: 10 hearts, each worth 10 HP
+    let heartsHtml = '';
+    for (let i = 0; i < 10; i++) {
+        const hpAt = player.hp - i * 10;
+        const file = hpAt >= 10 ? SPRITES.heartFull : hpAt >= 5 ? SPRITES.heartHalf : SPRITES.heartEmpty;
+        heartsHtml += `<img src="sprites/${file}.png" alt="">`;
+    }
+    document.getElementById('hearts').innerHTML = heartsHtml;
+    let cData = CASTLES[currentCastle - 1];
+    document.getElementById('locationText').innerText = `${cData.name} - Area ${currentArea}`;
+}
+
+function generateLevel() {
+    walls = [];
+    enemies = [];
+    projectiles = [];
+    particles = [];
+    effects = [];
+
+    let isBossArea = currentArea === 4;
+
+    // Border walls
+    walls.push({x:0, y:0, w:W, h:20, type:'brick'});
+    walls.push({x:0, y:H-20, w:W, h:20, type:'brick'});
+    walls.push({x:0, y:0, w:20, h:H, type:'brick'});
+    walls.push({x:W-20, y:0, w:20, h:H, type:'brick'});
+
+    // Procedural obstacles based on area
+    if (!isBossArea) {
+        if (currentArea === 1) { // Pillars
+            for(let i=0; i<4; i++) walls.push({x: 150 + i*150, y: 150, w: 40, h: 40, type:'pillar'});
+            for(let i=0; i<4; i++) walls.push({x: 150 + i*150, y: 400, w: 40, h: 40, type:'pillar'});
+        } else if (currentArea === 2) { // Corridors
+            walls.push({x: 150, y: 100, w: 500, h: 30, type:'brick'});
+            walls.push({x: 150, y: 470, w: 500, h: 30, type:'brick'});
+        } else if (currentArea === 3) { // Maze
+            walls.push({x: 200, y: 100, w: 30, h: 200, type:'block'});
+            walls.push({x: 570, y: 300, w: 30, h: 200, type:'block'});
+            walls.push({x: 350, y: 250, w: 100, h: 30, type:'block'});
+        }
+
+        // Spawn Enemies
+        let enemyCount = currentArea === 1 ? 3 : currentArea === 2 ? 5 : 4;
+        for (let i = 0; i < enemyCount; i++) {
+            let isElite = (currentArea === 3 && i === 0);
+            enemies.push(createEnemy(isElite));
+        }
+    } else {
+        // Boss Arena (corner cover = treasure chests)
+        walls.push({x: 100, y: 100, w: 50, h: 50, type:'chest'});
+        walls.push({x: 650, y: 100, w: 50, h: 50, type:'chest'});
+        walls.push({x: 100, y: 450, w: 50, h: 50, type:'chest'});
+        walls.push({x: 650, y: 450, w: 50, h: 50, type:'chest'});
+
+        // Spawn Boss
+        enemies.push(createBoss());
+    }
+
+    // Reset player position
+    player.x = W/2 - 15; player.y = H - 80;
+    updateUI();
+}
+
+function pickEnemySet() {
+    if (currentCastle === 1) {
+        if (currentArea === 1) return SPRITES.skeleton;
+        if (currentArea === 2) return SPRITES.ghoul;
+        return Math.random() < 0.5 ? SPRITES.skeleton : SPRITES.ghoul;
+    }
+    if (currentCastle === 2) return SPRITES.dknight;
+    return currentArea === 2 ? SPRITES.bat : SPRITES.wizard;
+}
+
+function createEnemy(isElite = false) {
+    const eliteSets = [SPRITES.elite1, SPRITES.elite2, SPRITES.elite3];
+    return {
+        type: 'enemy',
+        set: isElite ? eliteSets[currentCastle - 1] : pickEnemySet(),
+        height: isElite ? 62 : (currentCastle === 3 && currentArea === 2 && !isElite ? 42 : 50),
+        x: 100 + Math.random() * (W - 200),
+        y: 100 + Math.random() * (H - 300),
+        w: isElite ? 35 : 28, h: isElite ? 35 : 28,
+        hp: isElite ? 60 : 30, maxHp: isElite ? 60 : 30,
+        speed: isElite ? 1.8 : 1.2,
+        damage: isElite ? 15 : 8,
+        color: isElite ? '#e67e22' : '#c0392b',
+        dir: 2, facing: -1,
+        invincible: 0,
+        attackCooldown: 0,
+        hitFlash: 0,
+        animT: Math.floor(Math.random() * 100),
+        isElite: isElite
+    };
+}
+
+function createBoss() {
+    let castleIdx = currentCastle - 1;
+    let bossData = CASTLES[castleIdx];
+    return {
+        type: 'boss',
+        set: SPRITES.boss,
+        height: 120,
+        x: W/2 - 30, y: 100,
+        w: 60, h: 60,
+        hp: 200 + (castleIdx * 100), maxHp: 200 + (castleIdx * 100),
+        speed: 1.5 + (castleIdx * 0.3),
+        damage: 20 + (castleIdx * 5),
+        color: bossData.bossColor,
+        name: bossData.boss,
+        dir: 2, facing: -1,
+        invincible: 0,
+        attackCooldown: 0,
+        specialCooldown: 120,
+        attackAnim: 0,
+        hitFlash: 0,
+        animT: 0,
+        phase: 0
+    };
+}
+
+// --- COLLISION ---
+function rectCollide(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function moveEntity(ent, dx, dy) {
+    ent.x += dx;
+    if (walls.some(w => rectCollide(ent, w))) ent.x -= dx;
+    ent.y += dy;
+    if (walls.some(w => rectCollide(ent, w))) ent.y -= dy;
+}
+
+// --- COMBAT & LOGIC ---
+function getAttackBox(ent) {
+    let size = ent === player ? 40 : 30;
+    let bx = ent.x + ent.w/2 - size/2;
+    let by = ent.y + ent.h/2 - size/2;
+    if (ent.dir === 0) by -= size;
+    if (ent.dir === 2) by += size;
+    if (ent.dir === 3) bx -= size;
+    if (ent.dir === 1) bx += size;
+    return { x: bx, y: by, w: size, h: size };
+}
+
+function spawnEffect(x, y, files, targetH, life) {
+    effects.push({ x, y, files, targetH, life, maxLife: life, animT: 0 });
+}
+
+function dealDamage(target, amount, attacker) {
+    if (target.invincible > 0) return;
+
+    if (target === player && player.blocking) {
+        amount = Math.floor(amount * 0.2);
+        spawnParticles(player.x + player.w/2, player.y + player.h/2, '#3498db', 5);
+    } else {
+        target.hitFlash = 10;
+        spawnParticles(target.x + target.w/2, target.y + target.h/2, '#e74c3c', 8);
+    }
+
+    target.hp -= amount;
+    if (target === player) player.invincible = 30;
+
+    if (target.hp <= 0) {
+        target.hp = 0;
+        if (target.type === 'boss') {
+            spawnParticles(target.x + target.w/2, target.y + target.h/2, target.color, 50);
+            spawnEffect(target.x + target.w/2, target.y + target.h/2, SPRITES.boss.death, 130, 70);
+        } else {
+            spawnEffect(target.x + target.w/2, target.y + target.h/2, ['bad_guys_020'], 52, 22);
+        }
+    }
+}
+
+function spawnParticles(x, y, color, count) {
+    for(let i=0; i<count; i++) {
+        particles.push({
+            x, y,
+            vx: (Math.random() - 0.5) * 4,
+            vy: (Math.random() - 0.5) * 4,
+            life: 20 + Math.random() * 20,
+            color: color,
+            size: 2 + Math.random() * 3
+        });
+    }
+}
+
+function updatePlayer() {
+    let dx = 0, dy = 0;
+    player.moving = false;
+    if (keys['KeyW'] || keys['ArrowUp']) { dy = -1; player.dir = 0; }
+    if (keys['KeyS'] || keys['ArrowDown']) { dy = 1; player.dir = 2; }
+    if (keys['KeyA'] || keys['ArrowLeft']) { dx = -1; player.dir = 3; }
+    if (keys['KeyD'] || keys['ArrowRight']) { dx = 1; player.dir = 1; }
+    if (dx !== 0 || dy !== 0) player.moving = true;
+    if (dx !== 0) player.facing = dx > 0 ? 1 : -1;
+
+    player.blocking = keys['KeyX'] || keys['KeyK'] || keys['ShiftLeft'] || keys['ShiftRight'];
+
+    if (player.blocking) {
+        moveEntity(player, dx * player.speed * 0.4, dy * player.speed * 0.4);
+    } else {
+        moveEntity(player, dx * player.speed, dy * player.speed);
+    }
+
+    if ((keys['KeyZ'] || keys['KeyJ']) && player.attackCooldown <= 0 && !player.blocking) {
+        player.attacking = 15;
+        player.attackCooldown = 25;
+        let atkBox = getAttackBox(player);
+        enemies.forEach(e => {
+            if (e.hp > 0 && rectCollide(atkBox, e)) {
+                dealDamage(e, 25, player);
+            }
+        });
+    }
+
+    player.animT++;
+    if (player.attacking > 0) player.attacking--;
+    if (player.attackCooldown > 0) player.attackCooldown--;
+    if (player.invincible > 0) player.invincible--;
+    if (player.hitFlash > 0) player.hitFlash--;
+}
+
+function updateEnemies() {
+    enemies.forEach(e => {
+        if (e.hp <= 0) return;
+        e.animT++;
+        if (e.hitFlash > 0) e.hitFlash--;
+        if (e.attackCooldown > 0) e.attackCooldown--;
+        if (e.attackAnim > 0) e.attackAnim--;
+
+        let dx = player.x - e.x;
+        let dy = player.y - e.y;
+        let dist = Math.sqrt(dx*dx + dy*dy);
+
+        if (dist > 40) {
+            moveEntity(e, (dx/dist) * e.speed, (dy/dist) * e.speed);
+            e.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : (dy > 0 ? 2 : 0);
+            if (Math.abs(dx) > 1) e.facing = dx > 0 ? 1 : -1;
+        } else if (e.attackCooldown <= 0) {
+            dealDamage(player, e.damage, e);
+            e.attackCooldown = 60;
+        }
+
+        // Boss Special Attacks
+        if (e.type === 'boss') {
+            if (e.specialCooldown <= 0) {
+                e.specialCooldown = 120 - (currentCastle * 20);
+                e.attackAnim = 20;
+                let angle = Math.atan2(dy, dx);
+                projectiles.push({
+                    x: e.x + e.w/2, y: e.y + e.h/2,
+                    vx: Math.cos(angle) * 4, vy: Math.sin(angle) * 4,
+                    w: 12, h: 12, damage: 15, color: e.color, life: 120
+                });
+                if (currentCastle === 3) { // Emerald Dragon spread shot
+                    projectiles.push({ x: e.x+e.w/2, y: e.y+e.h/2, vx: Math.cos(angle+0.3)*4, vy: Math.sin(angle+0.3)*4, w:12, h:12, damage:15, color:e.color, life:120 });
+                    projectiles.push({ x: e.x+e.w/2, y: e.y+e.h/2, vx: Math.cos(angle-0.3)*4, vy: Math.sin(angle-0.3)*4, w:12, h:12, damage:15, color:e.color, life:120 });
+                }
+            } else {
+                e.specialCooldown--;
+            }
+        }
+    });
+}
+
+function updateProjectiles() {
+    projectiles.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life--;
+        if (rectCollide(p, player)) {
+            dealDamage(player, p.damage, null);
+            p.life = 0;
+        }
+        if (walls.some(w => rectCollide(p, w))) p.life = 0;
+    });
+    projectiles = projectiles.filter(p => p.life > 0);
+}
+
+function updateParticles() {
+    particles.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life--;
+    });
+    particles = particles.filter(p => p.life > 0);
+}
+
+function updateEffects() {
+    effects.forEach(e => { e.life--; e.animT++; });
+    effects = effects.filter(e => e.life > 0);
+}
+
+function checkAreaClear() {
+    if (enemies.every(e => e.hp <= 0)) {
+        gameState = 'TRANSITION';
+        let overlay = document.getElementById('overlay');
+        let title = document.getElementById('overlayTitle');
+        let sub = document.getElementById('overlaySub');
+
+        if (currentCastle === MAX_CASTLES && currentArea === MAX_AREAS) {
+            title.innerText = "VICTORY!";
+            title.style.color = "#f1c40f";
+            sub.innerText = "Aetheria is saved! Press SPACE to play again.";
+        } else {
+            title.innerText = "Area Cleared!";
+            title.style.color = "#2ecc71";
+            sub.innerHTML = `Press <span class="btn-hint">SPACE</span> to continue`;
+        }
+        overlay.style.display = 'flex';
+    }
+}
+
+function restartGame() {
+    currentCastle = 1; currentArea = 1;
+    initPlayer();
+    generateLevel();
+    gameState = 'PLAYING';
+    document.getElementById('overlay').style.display = 'none';
+}
+
+function nextArea() {
+    document.getElementById('overlay').style.display = 'none';
+
+    if (currentCastle === MAX_CASTLES && currentArea === MAX_AREAS) {
+        currentCastle = 1;
+        currentArea = 1;
+        initPlayer();
+    } else {
+        if (currentArea < MAX_AREAS) {
+            currentArea++;
+        } else {
+            currentCastle++;
+            currentArea = 1;
+            player.hp = Math.min(player.maxHp, player.hp + 30);
+        }
+    }
+
+    gameState = 'PLAYING';
+    generateLevel();
+}
+
+// --- RENDERING ---
+const PILLAR_FILES = () => [SPRITES.pillar1, SPRITES.pillar2, SPRITES.pillar3, SPRITES.pillar4];
+
+function drawFloor() {
+    let castleIdx = currentCastle - 1;
+    let cData = CASTLES[castleIdx];
+
+    // Dark base
+    ctx.fillStyle = '#0d0d0f';
+    ctx.fillRect(0, 0, W, H);
+
+    // Staggered stone-slab tiles
+    const slabs = [IMG[SPRITES.floor1], IMG[SPRITES.floor2], IMG[SPRITES.floor3]].filter(Boolean);
+    if (slabs.length) {
+        const tw = 190, th = 52;
+        const rowH = 58;
+        let row = 0;
+        for (let y = -10; y < H; y += rowH) {
+            const offset = (row % 2) ? -tw / 2 : 0;
+            for (let x = offset; x < W; x += tw + 6) {
+                const img = slabs[(row + Math.floor((x + tw) / (tw + 6))) % slabs.length];
+                ctx.drawImage(img, x, y, tw, th);
+            }
+            row++;
+        }
+    }
+
+    // Per-castle color tint over the floor
+    ctx.fillStyle = cData.tint;
+    ctx.fillRect(0, 0, W, H);
+}
+
+function drawWalls() {
+    const brick = IMG[SPRITES.brick];
+    const block = IMG[SPRITES.block];
+    const chest = IMG[SPRITES.chest];
+    const pillarFiles = PILLAR_FILES();
+
+    walls.forEach((w, i) => {
+        if (w.type === 'pillar') {
+            const img = IMG[pillarFiles[i % pillarFiles.length]];
+            if (img) {
+                const ph = 62, pw = ph * (img.width / img.height);
+                ctx.drawImage(img, w.x + w.w/2 - pw/2, w.y + w.h - ph, pw, ph);
+            }
+        } else if (w.type === 'chest') {
+            if (chest) {
+                const ch = 54, cw = ch * (chest.width / chest.height);
+                ctx.drawImage(chest, w.x + w.w/2 - cw/2, w.y + w.h - ch, cw, ch);
+            }
+        } else if (w.type === 'block') {
+            if (block) ctx.drawImage(block, w.x, w.y - 8, w.w, w.h + 16);
+        } else { // brick
+            // draw slightly oversized so the wall texture stays visible
+            if (brick) ctx.drawImage(brick, w.x - (w.w < 40 ? 8 : 0), w.y - (w.h < 40 ? 8 : 0),
+                w.w + (w.w < 40 ? 16 : 0), w.h + (w.h < 40 ? 16 : 0));
+        }
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(w.x + 0.5, w.y + 0.5, w.w - 1, w.h - 1);
+    });
+}
+
+function drawDecor() {
+    // Wooden doors set into the left and right walls
+    const door = IMG[SPRITES.door];
+    if (door && currentArea !== 4) {
+        const dh = 78, dw = dh * (door.width / door.height);
+        ctx.drawImage(door, 20 - dw * 0.25, H/2 - dh/2, dw, dh);
+        ctx.save();
+        ctx.translate(W - 20, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(door, -dw * 0.75, H/2 - dh/2, dw, dh);
+        ctx.restore();
+    }
+    // Boss room: iron gate backdrop
+    if (currentArea === 4) {
+        const gate = IMG[SPRITES.gate];
+        if (gate) {
+            const gh = 96, gw = gh * (gate.width / gate.height);
+            ctx.drawImage(gate, W/2 - gw/2, 20, gw, gh);
+        }
+    }
+}
+
+function drawParticles() {
+    particles.forEach(p => {
+        ctx.globalAlpha = Math.max(0, Math.min(1, p.life / 40));
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x, p.y, p.size, p.size);
+    });
+    ctx.globalAlpha = 1;
+}
+
+function drawProjectiles() {
+    const orb = IMG[SPRITES.orb];
+    projectiles.forEach(p => {
+        if (orb) {
+            ctx.save();
+            ctx.globalAlpha = Math.max(0.25, Math.min(1, p.life / 30));
+            const s = 30;
+            ctx.drawImage(orb, p.x - s/2, p.y - s/2, s, s * (orb.height / orb.width));
+            ctx.restore();
+        } else {
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.w/2, 0, Math.PI*2);
+            ctx.fill();
+        }
+    });
+}
+
+function drawEnemies() {
+    enemies.forEach(e => {
+        if (e.hp <= 0) return;
+        const state = (e.type === 'boss' && e.attackAnim > 0) ? 'attack' : 'walk';
+        const frames = e.set[state] || e.set.walk;
+        const file = animFrame(e, frames);
+        drawSprite(file, e.x + e.w/2, e.y + e.h + 6, e.height, e.facing);
+        // hit flash: tint the sprite area white
+        if (e.hitFlash > 0) {
+            flashSpriteArea(file, e, e.height);
+        }
+        // HP bar
+        if (e.type !== 'boss') {
+            ctx.fillStyle = '#500';
+            ctx.fillRect(e.x, e.y - 8, e.w, 4);
+            ctx.fillStyle = '#e74c3c';
+            ctx.fillRect(e.x, e.y - 8, e.w * (e.hp / e.maxHp), 4);
+        }
+    });
+}
+
+function flashSpriteArea(file, ent, height) {
+    const img = IMG[file];
+    if (!img) return;
+    const scale = height / img.height;
+    const dw = img.width * scale;
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    ctx.globalCompositeOperation = 'source-atop';
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(ent.x + ent.w/2 - dw/2, ent.y + ent.h - height, dw, height);
+    ctx.restore();
+}
+
+function drawPlayer() {
+    if (player.invincible % 4 >= 2) return; // damage-blink
+
+    let state = 'idle';
+    if (player.attacking > 0) state = 'slash';
+    else if (player.blocking) state = 'block';
+    else if (player.hitFlash > 6) state = 'hurt';
+    else if (player.moving) state = 'walk';
+
+    const file = animFrame(player, SPRITES.knight[state] || SPRITES.knight.idle);
+    drawSprite(file, player.x + player.w/2, player.y + player.h + 6, 64, player.facing);
+
+    if (player.hitFlash > 0) flashSpriteArea(file, player, 64);
+
+    // Sword slash trail toward facing direction
+    if (player.attacking > 0) {
+        const atk = getAttackBox(player);
+        const trail = IMG[SPRITES.slashTrail];
+        if (trail) {
+            const angle = { 0: -Math.PI/2, 1: 0, 2: Math.PI/2, 3: Math.PI }[player.dir];
+            ctx.save();
+            ctx.translate(atk.x + atk.w/2, atk.y + atk.h/2);
+            ctx.rotate(angle);
+            ctx.globalAlpha = 0.9;
+            const tw = 96, th = tw * (trail.height / trail.width);
+            ctx.drawImage(trail, -tw/2, -th/2, tw, th);
+            ctx.restore();
+        }
+    }
+
+    // Block shield ring
+    if (player.blocking) {
+        const ring = IMG[SPRITES.ring];
+        if (ring) {
+            ctx.save();
+            ctx.globalAlpha = 0.75 + 0.25 * Math.sin(player.animT * 0.3);
+            const s = 62;
+            ctx.drawImage(ring, player.x + player.w/2 - s/2, player.y + player.h/2 - s/2, s, s * (ring.height / ring.width));
+            ctx.restore();
+        }
+    }
+}
+
+function drawEffects() {
+    effects.forEach(e => {
+        const file = animFrame(e, e.files);
+        const alpha = Math.max(0, e.life / e.maxLife);
+        drawSprite(file, e.x, e.y + e.targetH / 2, e.targetH, -1, alpha);
+    });
+}
+
+function draw() {
+    drawFloor();
+    drawWalls();
+    drawDecor();
+    drawParticles();
+    drawProjectiles();
+    drawEffects();
+    drawEnemies();
+    drawPlayer();
+
+    // UI Updates
+    updateUI();
+
+    let boss = enemies.find(e => e.type === 'boss' && e.hp > 0);
+    let bossUi = document.getElementById('bossUi');
+    if (boss) {
+        bossUi.style.display = 'block';
+        document.getElementById('bossName').innerText = boss.name;
+        document.getElementById('bossHpFill').style.width = (boss.hp / boss.maxHp * 100) + '%';
+    } else {
+        bossUi.style.display = 'none';
+    }
+}
+
+// --- GAME LOOP ---
+function loop() {
+    if (gameState === 'PLAYING') {
+        updatePlayer();
+        updateEnemies();
+        updateProjectiles();
+        updateParticles();
+        updateEffects();
+
+        if (player.hp <= 0) {
+            gameState = 'GAMEOVER';
+            let overlay = document.getElementById('overlay');
+            document.getElementById('overlayTitle').innerText = "YOU DIED";
+            document.getElementById('overlayTitle').style.color = "#e74c3c";
+            document.getElementById('overlaySub').innerHTML = `Press <span class="btn-hint">SPACE</span> to restart`;
+            overlay.style.display = 'flex';
+        } else {
+            checkAreaClear();
+        }
+    } else if (gameState === 'GAMEOVER' && keys['Space']) {
+        keys['Space'] = false; // require a fresh press to restart
+        restartGame();
+    }
+
+    if (gameState !== 'LOADING') {
+        draw();
+    }
+    requestAnimationFrame(loop);
+}
+
+// --- INIT ---
+loadSprites().then(() => {
+    initPlayer();
+    generateLevel();
+    gameState = 'PLAYING';
+}).catch(err => {
+    document.getElementById('overlayTitle').innerText = 'Error';
+    document.getElementById('overlaySub').innerText = err.message;
+    console.error(err);
+});
+loop();
+</script>
+</body>
+</html>
